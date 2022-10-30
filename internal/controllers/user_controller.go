@@ -17,16 +17,37 @@ type UserController struct {
 
 func (c *UserController) Login(w http.ResponseWriter, r *http.Request) {
 	type LoginCredentials struct {
-		Username string `json:"username"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 
 	credentials := &LoginCredentials{}
 	if err := render.DecodeJSON(r.Body, credentials); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		utils.WriteError(w, http.StatusBadRequest, "Invalid payload")
 		return
 	}
 
-	token, err := c.generateToken(credentials.Username)
+	user := models.User{}
+	err := c.DB.Get(&user, "SELECT * FROM users WHERE email=$1", credentials.Email)
+	if err != nil {
+		utils.WriteError(w, http.StatusInternalServerError, "Could not retrieve the user from the database")
+		return
+	}
+
+	if user.ID == 0 {
+		utils.WriteError(w, http.StatusInternalServerError, "Wrong credentials")
+		return
+	}
+
+	if passwordsAreEqual := arePasswordsEqual([]byte(user.PasswordHash), []byte(credentials.Password)); !passwordsAreEqual {
+		utils.WriteError(w, http.StatusBadRequest, "Wrong credentials")
+		return
+	}
+
+	claims := make(map[string]interface{})
+	claims["firstName"] = user.FirstName
+	claims["email"] = user.Email
+	token, err := c.generateToken(claims)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -47,7 +68,7 @@ func (c *UserController) Register(w http.ResponseWriter, r *http.Request) {
 
 	newUser := &RegisterPayload{}
 	if err := render.DecodeJSON(r.Body, newUser); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		utils.WriteError(w, http.StatusBadRequest, "Invalid payload")
 		return
 	}
 
@@ -58,7 +79,7 @@ func (c *UserController) Register(w http.ResponseWriter, r *http.Request) {
 
 	// Validate if a user with the same email address already exists
 	existingUser := models.User{}
-	err := c.DB.Get(&existingUser, "SELECT * FROM users LIMIT 1")
+	err := c.DB.Get(&existingUser, "SELECT * FROM users WHERE email=$1", newUser.Email)
 	if err != nil {
 		utils.WriteError(w, http.StatusInternalServerError, "Error connecting verifying if an user with the same email already exists")
 		return
@@ -102,8 +123,16 @@ func generatePasswordHash(password string) (string, error) {
 	return string(bytes), nil
 }
 
-func (c *UserController) generateToken(username string) (string, error) {
-	_, tokenString, err := c.TokenAuth.Encode(map[string]interface{}{"username": username})
+func arePasswordsEqual(hashedPassword, password []byte) bool {
+	err := bcrypt.CompareHashAndPassword(hashedPassword, password)
+	if err != nil {
+		return false
+	}
+	return true
+}
+
+func (c *UserController) generateToken(claims map[string]interface{}) (string, error) {
+	_, tokenString, err := c.TokenAuth.Encode(claims)
 	if err != nil {
 		return "", err
 	}
