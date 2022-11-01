@@ -2,21 +2,11 @@ package main
 
 import (
 	"github.com/Oxyrus/shopping/internal/controllers"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/jwtauth/v5"
+	"github.com/Oxyrus/shopping/internal/middlewares"
+	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
-	"net/http"
 )
-
-const secret = "<secret>"
-
-var tokenAuth *jwtauth.JWTAuth
-
-func init() {
-	tokenAuth = jwtauth.New("HS256", []byte(secret), nil)
-}
 
 func main() {
 	db, err := sqlx.Open("postgres", "postgres://andres:@localhost/shopping?sslmode=disable")
@@ -25,35 +15,21 @@ func main() {
 	}
 	defer db.Close()
 
-	r := chi.NewRouter()
+	r := gin.Default()
 
-	r.Use(middleware.AllowContentEncoding("application/json"))
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
+	api := r.Group("/api")
 
-	r.Route("/api", func(r chi.Router) {
-		healthController := controllers.HealthController{}
-		r.Get("/health", healthController.GetHealthStatus)
+	userController := controllers.UserController{DB: db}
+	api.POST("/login", userController.Login)
+	api.POST("/register", userController.Register)
 
-		userController := controllers.UserController{
-			TokenAuth: tokenAuth,
-			DB:        db,
-		}
-		r.Post("/login", userController.Login)
-		r.Post("/register", userController.Register)
+	protected := api.Group("/profile")
+	protected.Use(middlewares.AuthMiddleware())
 
-		// Protected routes
-		r.Group(func(r chi.Router) {
-			r.Use(jwtauth.Verifier(tokenAuth))
+	healthController := controllers.HealthController{}
+	protected.GET("/health", healthController.GetHealthStatus)
 
-			r.Get("/profile", userController.Profile)
-		})
-	})
-
-	err = http.ListenAndServe(":4000", r)
-	if err != nil {
+	if err = r.Run(); err != nil {
 		panic(err)
 	}
 }

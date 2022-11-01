@@ -1,10 +1,15 @@
 package controllers
 
-import "net/http"
+import (
+	"github.com/gin-gonic/gin"
+	"net/http"
+)
 
+// HealthController provides an endpoint to verify the service status.
 type HealthController struct{}
 
-func (c *HealthController) GetHealthStatus(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Healthy"))
+// GetHealthStatus provides a handler that will return a status code 200
+// if the service is operational.
+func (c *HealthController) GetHealthStatus(ctx *gin.Context) {
+	ctx.JSON(http.StatusOK, gin.H{"message": "Healthy"})
 }
